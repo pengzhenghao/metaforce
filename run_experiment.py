@@ -140,7 +140,8 @@ def run_td3(
         # Select action randomly or according to policy
         if t <= learn_start:
             action = env.action_space.sample()
-            context = np.zeros((policy.hidden_state_dim,), dtype=np.float32)
+            if context_mode == "random":
+                context = np.zeros((policy.hidden_state_dim,), dtype=np.float32)
         else:
 
             if context_mode:
@@ -173,7 +174,7 @@ def run_td3(
         # Store data in replay buffer
         replay_buffer.add(
             state, action, next_state, reward, done_bool, -cost,
-            context=context if policy.context_mode == "random" else None
+            context=context if context_mode == "random" else None
             # rnn_state=policy.prev_state if use_rnn else None
         )
         # TODO why use nagative cost above?????
