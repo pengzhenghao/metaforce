@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .cnn_model import ConvActor, ConvCritic
+# from .cnn_model import ConvActor, ConvCritic
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -78,10 +78,11 @@ class TD3(object):
     ):
 
         if isinstance(state_dim, tuple):
+            raise NotImplementedError()
             # Image input!
-            self.actor = ConvActor(state_dim, action_dim, max_action).to(device)
-            self.critic = ConvCritic(state_dim, action_dim).to(device)
-            self.obs_rgb = True
+            # self.actor = ConvActor(state_dim, action_dim, max_action).to(device)
+            # self.critic = ConvCritic(state_dim, action_dim).to(device)
+            # self.obs_rgb = True
         else:
             self.actor = Actor(state_dim, action_dim, max_action).to(device)
             self.critic = Critic(state_dim, action_dim).to(device)

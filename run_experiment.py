@@ -37,17 +37,18 @@ def run_td3(
         batch_size=256,
         learn_start=25e3,
         max_timesteps=1e6,
-        # max_episode_steps=1000,
+        max_episode_steps=1000,
         eval_env_fn=None,
-        saferl_config=None,
-        tune_track=False,
+        # saferl_config=None,
+        # tune_track=False,
         # use_rnn=False,
         rnn_state_dim=24,
         rnn_seq_len=20,
+        context_mode="disable",
         **kwargs
 ):
     # saferl_config = core.check_saferl_config(saferl_config)
-    max_episode_steps = saferl_config["max_ep_len"]
+    # max_episode_steps = saferl_config["max_ep_len"]
 
     # file_name = f"{env_name}_{seed}_ipd" \
     #             f"{saferl_config[core.USE_IPD]}_ipds" \
@@ -92,7 +93,7 @@ def run_td3(
     kwargs["noise_clip"] = noise_clip * max_action
     kwargs["policy_freq"] = policy_freq
 
-    context_mode = saferl_config.get("context_mode", None)
+    # context_mode = saferl_config.get("context_mode", None)
     if context_mode == "disable":
         context_mode = None
 
@@ -323,19 +324,10 @@ if __name__ == "__main__":
                         default="add_both_transition")
     args = parser.parse_args()
 
-    saferl_config = {
-        # core.USE_IPD: args.use_ipd,
-        # core.USE_IPD_SOFT: args.use_ipd_soft,
-        # core.USE_CTNB: args.use_ctnb,
-        # core.USE_QDIFF: args.use_qdiff,
-        # "cost_threshold": args.cost_threshold,
-        # "obs_rgb": False,
-        "context_mode": args.context_mode
-    }
-
     run_td3(
-        env_fn=make_env_fn(args.env_name, saferl_config, args.seed),
-        saferl_config=saferl_config,
+        env_fn=make_env_fn(args.env_name),
+        # context_mode=args.context_mode,
+        # saferl_config=saferl_config,
         # use_rnn=args.context_mode,
         **vars(args)
     )
