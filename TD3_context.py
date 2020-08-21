@@ -56,7 +56,7 @@ class TD3Context(TD3):
                 "critic" in context_mode)
         param_add_actor = ("both" in context_mode) or ("actor" in context_mode)
 
-        if "transition" in context_mode:
+        if ("transition" in context_mode) or (context_mode == "random"):
             context_state_dim = state_dim * 2 + action_dim
         else:
             context_state_dim = state_dim
@@ -101,7 +101,8 @@ class TD3Context(TD3):
         feed_state = torch.cat([state, context], dim=2)
         self.prev_state = next_state
 
-        return self.actor(feed_state).cpu().data.numpy().flatten()
+        return self.actor(feed_state).cpu().data.numpy().flatten(), \
+               context.detach().cpu().numpy()
         # return self.actor(state).cpu().data.numpy().flatten()
 
     def select_action_in_batch(self, state):
@@ -112,19 +113,14 @@ class TD3Context(TD3):
     def train(self, replay_buffer, batch_size=100):
         self.total_it += 1
 
-        torch.autograd.set_detect_anomaly(True)
-
-        assert replay_buffer.use_rnn
-
         # Sample replay buffer
-        state, action, next_state, reward, not_done, cost, rnn_data \
-            = replay_buffer.sample(batch_size)
+        state, action, next_state, reward, not_done, cost, context, \
+        next_context = replay_buffer.sample(batch_size)
 
-        current_context_all, _ = self.context_model(rnn_data)
-
-        current_context = current_context_all[-2]
-        next_context = current_context_all[-1]
-        current_input = torch.cat([state, current_context], dim=1)
+        # current_context_all, _ = self.context_model(rnn_data)
+        # current_context = current_context_all[-2]
+        # next_context = current_context_all[-1]
+        current_input = torch.cat([state, context], dim=1)
 
         # current_input = torch.cat([state, current_context], dim=1)
 
@@ -133,11 +129,7 @@ class TD3Context(TD3):
             noise = (torch.randn_like(action) * self.policy_noise
                      ).clamp(-self.noise_clip, self.noise_clip)
 
-            # next_context = self.context_model(rnn_data, next_rnn_states)
-
-            # next_context, _ = self.context_model(next_rnn_data)
-            # next_context = next_context[-1]
-            next_input = torch.cat([next_state, next_context.detach()], dim=1)
+            next_input = torch.cat([next_state, next_context], dim=1)
 
             next_action = (self.actor_target(next_input) +
                            noise).clamp(-self.max_action, self.max_action)
@@ -165,13 +157,12 @@ class TD3Context(TD3):
 
         # Delayed policy updates
         if self.total_it % self.policy_freq == 0:
-            actor_current_context, _ = self.context_model(rnn_data)
+            # actor_current_context, _ = self.context_model(rnn_data)
 
             # actor_current_context = actor_current_context[-1]
-            actor_current_context = actor_current_context[-2]
+            # actor_current_context = actor_current_context[-2]
 
-            actor_current_input = torch.cat([state, actor_current_context],
-                                            dim=1)
+            actor_current_input = torch.cat([state, context], dim=1)
 
             # Compute actor loss
             actor_loss = -self.critic.Q1(

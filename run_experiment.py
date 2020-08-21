@@ -47,14 +47,6 @@ def run_td3(
         context_mode="disable",
         **kwargs
 ):
-    # saferl_config = core.check_saferl_config(saferl_config)
-    # max_episode_steps = saferl_config["max_ep_len"]
-
-    # file_name = f"{env_name}_{seed}_ipd" \
-    #             f"{saferl_config[core.USE_IPD]}_ipds" \
-    #             f"{saferl_config[core.USE_IPD_SOFT]}_ctnb" \
-    #             f"{saferl_config[core.USE_CTNB]}"
-
     result_path = os.path.join(local_dir, "results")
     if not os.path.exists(result_path):
         os.makedirs(result_path)
@@ -109,10 +101,9 @@ def run_td3(
         policy.load(os.path.join(model_path, policy_file))
 
     replay_buffer = ReplayBuffer(
-        state_dim, action_dim, use_rnn=bool(context_mode),
-        rnn_state_dim=rnn_state_dim, rnn_seq_len=rnn_seq_len,
-        rnn_use_transition="transition" in context_mode
-        if context_mode else None
+        state_dim, action_dim, save_context=context_mode == "random",
+        context_dim=policy.hidden_state_dim \
+            if context_mode == "random" else None
     )
 
     # Evaluate untrained policy
@@ -149,15 +140,16 @@ def run_td3(
         # Select action randomly or according to policy
         if t <= learn_start:
             action = env.action_space.sample()
+            context = np.zeros((policy.hidden_state_dim,), dtype=np.float32)
         else:
 
             if context_mode:
-                if "transition" in context_mode:
+                if ("transition" in context_mode) or (context_mode == "random"):
                     transition = np.concatenate(
                         [last_state, last_action, state])
                 else:
                     transition = state
-                action = policy.select_action(
+                action, context = policy.select_action(
                     np.array(state), np.array(transition))
             else:
                 action = policy.select_action(np.array(state))
@@ -175,28 +167,13 @@ def run_td3(
         episode_cost += cost
         cumulative_cost += cost
 
-        # FIXME how to deal with early stop counting?
-
-        # if saferl_config[core.USE_IPD] or saferl_config[core.USE_IPD_SOFT]:
-        #     if saferl_config[core.USE_IPD_SOFT]:
-        #         ipd_episode_cost += (
-        #                 cost - saferl_config["cost_threshold"] /
-        #                 saferl_config["max_ep_len"]
-        #         )
-        #         early_stop = ipd_episode_cost > 0.0
-        #     else:
-        #         early_stop = episode_cost > saferl_config["cost_threshold"]
-        #     if early_stop:
-        #         info["early_stop"] = True
-        #         done = True
-        #         early_stop_counter += 1
-
         # TODO why 0 when exceed the limit?
         done_bool = float(done) if episode_timesteps < max_episode_steps else 0
 
         # Store data in replay buffer
         replay_buffer.add(
             state, action, next_state, reward, done_bool, -cost,
+            context=context if policy.context_mode == "random" else None
             # rnn_state=policy.prev_state if use_rnn else None
         )
         # TODO why use nagative cost above?????
@@ -249,13 +226,14 @@ def run_td3(
 
         # Evaluate episode
         if t % eval_freq == 0:
+        # if True:
             eval_result = eval_policy(policy, env_fn, seed)
             evaluations.append(eval_result)
             np.save(
                 os.path.join(result_path, "{}_eval".format(t)),
                 evaluations
             )
-            policy.save(model_path)
+            policy.save(os.path.join(model_path, "{}".format(t)))
 
 
 if __name__ == "__main__":
