@@ -5,12 +5,20 @@ from collections import deque, defaultdict
 import gym
 import numpy as np
 import torch
-from ray.tune import track
+# from ray.tune import track
 
-from safe_rl.td3 import TD3, TD3CTNB, ReplayBuffer, eval_policy, TD3QDiff, \
-    TD3Context
-from safe_rl.utils import core
-from safety_gym.make_env import make_env_fn
+from TD3 import TD3
+from TD3_context import TD3Context
+from utils import ReplayBuffer, eval_policy
+
+
+# from safe_rl.td3 import TD3, TD3CTNB, ReplayBuffer, eval_policy, TD3QDiff, \
+#     TD3Context
+# from safe_rl.utils import core
+# from safety_gym.make_env import make_env_fn
+
+def make_env_fn(env_name):
+    return lambda: gym.make(env_name)
 
 
 def run_td3(
@@ -38,19 +46,19 @@ def run_td3(
         rnn_seq_len=20,
         **kwargs
 ):
-    saferl_config = core.check_saferl_config(saferl_config)
+    # saferl_config = core.check_saferl_config(saferl_config)
     max_episode_steps = saferl_config["max_ep_len"]
 
-    file_name = f"{env_name}_{seed}_ipd" \
-                f"{saferl_config[core.USE_IPD]}_ipds" \
-                f"{saferl_config[core.USE_IPD_SOFT]}_ctnb" \
-                f"{saferl_config[core.USE_CTNB]}"
+    # file_name = f"{env_name}_{seed}_ipd" \
+    #             f"{saferl_config[core.USE_IPD]}_ipds" \
+    #             f"{saferl_config[core.USE_IPD_SOFT]}_ctnb" \
+    #             f"{saferl_config[core.USE_CTNB]}"
 
-    result_path = os.path.join(local_dir, file_name, "results")
+    result_path = os.path.join(local_dir, "results")
     if not os.path.exists(result_path):
         os.makedirs(result_path)
 
-    model_path = os.path.join(local_dir, file_name, "models")
+    model_path = os.path.join(local_dir, "models")
     if not os.path.exists(model_path):
         os.makedirs(model_path)
 
@@ -88,21 +96,15 @@ def run_td3(
     if context_mode == "disable":
         context_mode = None
 
-    if saferl_config[core.USE_CTNB]:
-        # Target policy smoothing is scaled wrt the action scale
-        policy = TD3CTNB(**kwargs)
-    elif saferl_config[core.USE_QDIFF]:
-        policy = TD3QDiff(**kwargs)
+    if context_mode:
+        kwargs["context_mode"] = context_mode
+        policy = TD3Context(**kwargs)
+        print("We are using TD3-context model now!")
     else:
-        if context_mode:
-            kwargs["context_mode"] = context_mode
-            policy = TD3Context(**kwargs)
-            print("We are using TD3-context model now!")
-        else:
-            policy = TD3(**kwargs)
+        policy = TD3(**kwargs)
 
     if load_model != "":
-        policy_file = file_name if load_model == "default" else load_model
+        policy_file = load_model
         policy.load(os.path.join(model_path, policy_file))
 
     replay_buffer = ReplayBuffer(
@@ -133,11 +135,11 @@ def run_td3(
     cumulative_cost_record = deque(maxlen=record_length)
     other_stats = defaultdict(lambda: deque(maxlen=record_length))
 
-    if saferl_config[core.USE_IPD_SOFT]:
-        ipd_episode_cost = 0.0
+    # if saferl_config[core.USE_IPD_SOFT]:
+    #     ipd_episode_cost = 0.0
 
     last_state = np.zeros_like(state)
-    last_action = np.zeros((action_dim, ))
+    last_action = np.zeros((action_dim,))
 
     for t in range(1, int(max_timesteps) + 1):
 
@@ -150,7 +152,8 @@ def run_td3(
 
             if context_mode:
                 if "transition" in context_mode:
-                    transition = np.concatenate([last_state, last_action, state])
+                    transition = np.concatenate(
+                        [last_state, last_action, state])
                 else:
                     transition = state
                 action = policy.select_action(
@@ -173,19 +176,19 @@ def run_td3(
 
         # FIXME how to deal with early stop counting?
 
-        if saferl_config[core.USE_IPD] or saferl_config[core.USE_IPD_SOFT]:
-            if saferl_config[core.USE_IPD_SOFT]:
-                ipd_episode_cost += (
-                        cost - saferl_config["cost_threshold"] /
-                        saferl_config["max_ep_len"]
-                )
-                early_stop = ipd_episode_cost > 0.0
-            else:
-                early_stop = episode_cost > saferl_config["cost_threshold"]
-            if early_stop:
-                info["early_stop"] = True
-                done = True
-                early_stop_counter += 1
+        # if saferl_config[core.USE_IPD] or saferl_config[core.USE_IPD_SOFT]:
+        #     if saferl_config[core.USE_IPD_SOFT]:
+        #         ipd_episode_cost += (
+        #                 cost - saferl_config["cost_threshold"] /
+        #                 saferl_config["max_ep_len"]
+        #         )
+        #         early_stop = ipd_episode_cost > 0.0
+        #     else:
+        #         early_stop = episode_cost > saferl_config["cost_threshold"]
+        #     if early_stop:
+        #         info["early_stop"] = True
+        #         done = True
+        #         early_stop_counter += 1
 
         # TODO why 0 when exceed the limit?
         done_bool = float(done) if episode_timesteps < max_episode_steps else 0
@@ -236,8 +239,8 @@ def run_td3(
             last_state = np.zeros_like(state)
             last_action = np.zeros((action_dim,))
 
-            if saferl_config[core.USE_IPD_SOFT]:
-                ipd_episode_cost = 0
+            # if saferl_config[core.USE_IPD_SOFT]:
+            #     ipd_episode_cost = 0
 
         else:
             last_action = action.copy()
@@ -248,32 +251,10 @@ def run_td3(
             eval_result = eval_policy(policy, env_fn, seed)
             evaluations.append(eval_result)
             np.save(
-                os.path.join(result_path, "{}_{}_eval".format(file_name, t)),
+                os.path.join(result_path, "{}_eval".format(t)),
                 evaluations
             )
-            policy.save(os.path.join(model_path, "{}".format(file_name)))
-
-            if tune_track:
-                track.log(
-                    episode_reward_min=np.min(episode_reward_record),
-                    episode_reward_mean_train=np.mean(episode_reward_record),
-                    episode_reward_mean=eval_result[0],
-                    episode_reward_max=np.max(episode_reward_record),
-                    episode_cost_min=np.min(episode_cost_record),
-                    episode_cost_mean_train=np.mean(episode_cost_record),
-                    episode_cost_mean=eval_result[1],
-                    episode_cost_max=np.max(episode_cost_record),
-                    cost_rate=np.mean(cost_rate_record),
-                    early_stop_rate=early_stop_counter / episode_num,
-                    episodes_this_iter=episode_num - prev_episode_num,
-                    timesteps_this_iter=t - prev_timesteps_total,
-                    mean_loss=np.mean(episode_cost_record),
-                    mean_accuracy=np.mean(cost_rate_record),
-                    **{k: np.mean(v)
-                       for k, v in other_stats.items()}
-                )
-                prev_episode_num = episode_num
-                prev_timesteps_total = t
+            policy.save(model_path)
 
 
 if __name__ == "__main__":
@@ -338,16 +319,17 @@ if __name__ == "__main__":
     parser.add_argument("--use-ipd-soft", action="store_true")
     parser.add_argument("--use-ctnb", action="store_true")
     parser.add_argument("--use-qdiff", action="store_true")
-    parser.add_argument("--context-mode", type=str, default="add_both_transition")
+    parser.add_argument("--context-mode", type=str,
+                        default="add_both_transition")
     args = parser.parse_args()
 
     saferl_config = {
-        core.USE_IPD: args.use_ipd,
-        core.USE_IPD_SOFT: args.use_ipd_soft,
-        core.USE_CTNB: args.use_ctnb,
-        core.USE_QDIFF: args.use_qdiff,
-        "cost_threshold": args.cost_threshold,
-        "obs_rgb": False,
+        # core.USE_IPD: args.use_ipd,
+        # core.USE_IPD_SOFT: args.use_ipd_soft,
+        # core.USE_CTNB: args.use_ctnb,
+        # core.USE_QDIFF: args.use_qdiff,
+        # "cost_threshold": args.cost_threshold,
+        # "obs_rgb": False,
         "context_mode": args.context_mode
     }
 
