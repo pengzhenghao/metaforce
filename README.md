@@ -1,8 +1,10 @@
-# TD3-context Experimental Repo
+# metaforce: the benchmark of state-of-the-art Meta Reinforcement Learning algorithms
 
-PENG Zhenghao, LI Yunxinag
+PENG Zhenghao, LI Yunxiang
 
-This is the internal repo for investigating the topics of meta-learning in Reinforcement Learning.
+This is the internal repo for investigating the topics of meta-learning in Reinforcement Learning. 
+
+🚘 Here is the [roadmap](https://github.com/pengzhenghao/metaforce/projects/1) of this project.
 
 ## Installation
 
