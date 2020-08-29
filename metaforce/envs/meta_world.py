@@ -3,7 +3,6 @@ import random
 import gym
 import metaworld
 import numpy as np
-from gym.core import Wrapper
 from gym.spaces import Box
 
 
@@ -12,14 +11,14 @@ from gym.spaces import Box
 # @a3e80c2439aa96ff221d6226bcf7ab8b49689898
 
 class MetaWrapperEnv(gym.Env):
-    def __init__(self, env_name, test_mode=False):
+    def __init__(self, env_name, eval=False):
         if env_name == "ml10":
             ml = metaworld.ML10()
         elif env_name == "ml45":
             ml = metaworld.ML45()
 
         self.training_envs = []
-        if test_mode:
+        if eval:
             task_class = ml.test_tasks
         else:
             task_class = ml.train_classes
@@ -83,63 +82,35 @@ class MetaWrapperEnv(gym.Env):
         )
 
 
-class GymWrapper(gym.Wrapper):
-    def __init__(self, env):
-        Wrapper.__init__(self, env=env)
-
-    def set_env_state(self, state):
-        self.env.sim.set_state(state)
-
-    def get_env_state(self):
-        return self.env.sim.get_state()
-
-
-def make_train_env_fn(env_name, ml1_name=None):
+def make_metaworld_env_fn(env_name, ml1_name=None, eval=False):
     if env_name == "ml1":  # MT1
         def make_env():
             assert ml1_name is not None
             ml1 = metaworld.ML1(ml1_name)
-            env = ml1.train_classes[ml1_name]()
-            task = random.choice(ml1.train_tasks)
+            if eval:
+                env = ml1.test_classes[ml1_name]()
+                task = random.choice(ml1.test_tasks)
+            else:
+                env = ml1.train_classes[ml1_name]()
+                task = random.choice(ml1.train_tasks)
             env.set_task(task)
             return env
 
     elif env_name == "ml10" or env_name == "ml45":  # MT10 or MT45
         def make_env():
-            return MetaWrapperEnv(env_name, test_mode=False)
+            return MetaWrapperEnv(env_name, eval=eval)
 
     else:
-        def make_env():
-            env = gym.make(env_name)
-            return GymWrapper(env)
-
-    return make_env
-
-
-def make_eval_env_fn(env_name, ml1_name=None):
-    if env_name == "ml1":  # MT1
-        def make_env():
-            assert ml1_name is not None
-            ml1 = metaworld.ML1(ml1_name)
-            env = ml1.test_classes[ml1_name]()
-            task = random.choice(ml1.test_tasks)
-            env.set_task(task)
-            return env
-
-    elif env_name == "ml10" or env_name == "ml45":  # MT10 or MT45
-        def make_env():
-            return MetaWrapperEnv(env_name, test_mode=True)
-
-    else:  # gym environment
-        make_env = lambda: gym.make(env_name)
+        raise ValueError("Unknown metaworld env_name: {}".format(env_name))
 
     return make_env
 
 
 if __name__ == '__main__':
     # For test purpose
-    make_envs = [make_train_env_fn("ml10"), make_train_env_fn("ml45"),
-                 make_eval_env_fn("ml10"), make_eval_env_fn("ml45")]
+    make_envs = [make_metaworld_env_fn("ml10", eval=False),
+                 make_metaworld_env_fn("ml45", eval=False),
+                 make_metaworld_env_fn("ml10", eval=True)]
     for idx, make_env in enumerate(make_envs):
         env = make_env()
         o = env.reset()

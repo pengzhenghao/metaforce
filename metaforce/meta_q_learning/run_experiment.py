@@ -5,12 +5,13 @@ from collections import deque, defaultdict
 import gym
 import numpy as np
 import torch
-# from ray.tune import track
 
-from TD3 import TD3
-from TD3_context import TD3Context
-from utils import ReplayBuffer, eval_policy
-from env_util import make_train_env_fn
+from metaforce.envs.meta_world import make_metaworld_env_fn
+from metaforce.meta_q_learning import TD3, TD3Context
+from metaforce.meta_q_learning.utils import ReplayBuffer, eval_policy
+
+
+# from ray.tune import track
 
 
 # from safe_rl.td3 import TD3, TD3CTNB, ReplayBuffer, eval_policy, TD3QDiff, \
@@ -225,7 +226,7 @@ def run_td3(
 
         # Evaluate episode
         if t % eval_freq == 0:
-        # if True:
+            # if True:
             eval_result = eval_policy(policy, env_fn, seed)
             evaluations.append(eval_result)
             np.save(
@@ -302,7 +303,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_td3(
-        env_fn=make_train_env_fn(args.env_name),
+        env_fn=make_metaworld_env_fn(args.env_name),
         # context_mode=args.context_mode,
         # saferl_config=saferl_config,
         # use_rnn=args.context_mode,

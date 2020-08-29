@@ -1,1 +1,0 @@
-git+https://github.com/rlworkgroup/metaworld.git@a3e80c2439aa96ff221d6226bcf7ab8b49689898

@@ -9,9 +9,11 @@ This is the internal repo for investigating the topics of meta-learning in Reinf
 Please follow the scripts to setup the environment.
 
 ```bash
-conda create -n context python=3.7
-conda activate context
-pip install -r requirements.txt
+git clone https://github.com/pengzhenghao/metaforce.git
+cd metaforce
+conda create -n metaforce python=3.7
+conda activate metaforce
+pip install -e .
 ```
 
 Besides, you should also install pytorch following the [official tutorial](https://pytorch.org/get-started/locally/).
