@@ -10,15 +10,13 @@ import torch
 from TD3 import TD3
 from TD3_context import TD3Context
 from utils import ReplayBuffer, eval_policy
+from env_util import make_train_env_fn
 
 
 # from safe_rl.td3 import TD3, TD3CTNB, ReplayBuffer, eval_policy, TD3QDiff, \
 #     TD3Context
 # from safe_rl.utils import core
 # from safety_gym.make_env import make_env_fn
-
-def make_env_fn(env_name):
-    return lambda: gym.make(env_name)
 
 
 def run_td3(
@@ -304,7 +302,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     run_td3(
-        env_fn=make_env_fn(args.env_name),
+        env_fn=make_train_env_fn(args.env_name),
         # context_mode=args.context_mode,
         # saferl_config=saferl_config,
         # use_rnn=args.context_mode,
