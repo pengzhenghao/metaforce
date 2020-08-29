@@ -19,13 +19,16 @@ class MetaWrapperEnv(gym.Env):
 
         self.training_envs = []
         if eval:
-            task_class = ml.test_tasks
+            task_class = ml.test_classes
+            tasks = ml.test_tasks
         else:
             task_class = ml.train_classes
+            tasks = ml.train_tasks
         for name, env_cls in task_class.items():
             env = env_cls()
-            task = random.choice([task for task in ml.train_tasks
-                                  if task.env_name == name])
+            task = random.choice([
+                task for task in tasks if task.env_name == name
+            ])
             env.set_task(task)
             self.training_envs.append(env)
 
@@ -50,7 +53,10 @@ class MetaWrapperEnv(gym.Env):
 
     def step(self, action):
         assert self.current_env is not None, "reset before step"
-        return self.current_env.step(action)
+        o, r, _, i = self.current_env.step(action)
+        done = getattr(self.current_env, 'curr_path_length',
+                       0) == self.current_env.max_path_length
+        return o, r, done, i
 
     def render(self):
         self.current_env.render()
@@ -94,11 +100,14 @@ def make_metaworld_env_fn(env_name, ml1_name=None, eval=False):
                 env = ml1.train_classes[ml1_name]()
                 task = random.choice(ml1.train_tasks)
             env.set_task(task)
+            env.reset()
             return env
 
     elif env_name == "ml10" or env_name == "ml45":  # MT10 or MT45
         def make_env():
-            return MetaWrapperEnv(env_name, eval=eval)
+            env = MetaWrapperEnv(env_name, eval=eval)
+            env.reset()
+            return env
 
     else:
         raise ValueError("Unknown metaworld env_name: {}".format(env_name))

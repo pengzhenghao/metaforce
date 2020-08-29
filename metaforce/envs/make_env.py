@@ -14,7 +14,7 @@ class GymWrapper(gym.Wrapper):
         return self.env.sim.get_state()
 
 
-def make_env(env_name, eval=False):
+def make_env_fn(env_name, eval=False):
     if env_name in ["ml1", "ml10", "ml45"]:
         return make_metaworld_env_fn(env_name, eval=eval)
     else:

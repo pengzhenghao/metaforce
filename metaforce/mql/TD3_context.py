@@ -2,7 +2,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from TD3 import TD3, device
+from metaforce.mql.utils import RandomContextReplayBuffer, \
+    LearnableContextReplayBuffer
+from metaforce.td3 import TD3
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class ContextModel(nn.Module):
@@ -73,9 +77,9 @@ class TD3Context(TD3):
             noise_clip, policy_freq
         )
 
-        # self.context_model_optimizer = torch.optim.Adam(
-        #     self.context_model.parameters(), lr=3e-4
-        # )
+        self.context_model_optimizer = torch.optim.Adam(
+            self.context_model.parameters(), lr=3e-4
+        )
 
         # Add the parameter of context model into the optimizer.
         actor_param = list(self.actor.parameters())
@@ -91,6 +95,10 @@ class TD3Context(TD3):
         self.prev_state = torch.zeros(
             [1, 1, self.hidden_state_dim], device=device, dtype=torch.float32
         )
+
+    @property
+    def learnable_context(self):
+        return self.context_mode not in ["random", "disable"]
 
     def select_action(self, state, transition):
         state = torch.FloatTensor(state.reshape(1, 1, -1)).to(device)
@@ -114,15 +122,28 @@ class TD3Context(TD3):
         self.total_it += 1
 
         # Sample replay buffer
-        state, action, next_state, reward, not_done, cost, context, \
-        next_context = replay_buffer.sample(batch_size)
+        if self.learnable_context:
+            assert isinstance(replay_buffer, LearnableContextReplayBuffer)
+            _, state, action, next_state, reward, not_done, cost, rnn_data = \
+                replay_buffer.sample(batch_size)
+        else:
+            assert isinstance(replay_buffer, RandomContextReplayBuffer)
+            _, state, action, next_state, reward, not_done, cost, context, \
+            next_context = replay_buffer.sample(batch_size)
 
-        # current_context_all, _ = self.context_model(rnn_data)
-        # current_context = current_context_all[-2]
-        # next_context = current_context_all[-1]
-        current_input = torch.cat([state, context], dim=1)
+        if self.learnable_context:
+            current_context_all, _ = self.context_model(rnn_data)
 
-        # current_input = torch.cat([state, current_context], dim=1)
+            # Note: we store rnn_data for length of (seq_len + 1)
+            # So that the return hidden state (say h) has same length
+            # (seq_len + 1). We take h[-2] to get the correct current
+            # context.
+            current_context = current_context_all[-2]
+            next_context = current_context_all[-1]
+
+            current_input = torch.cat([state, current_context], dim=1)
+        else:
+            current_input = torch.cat([state, context], dim=1)
 
         with torch.no_grad():
             # Select action according to policy and add clipped noise
@@ -139,10 +160,6 @@ class TD3Context(TD3):
             target_Q = torch.min(target_Q1, target_Q2)
             target_Q = reward + not_done * self.discount * target_Q
 
-        # Build current input
-        # current_context, _ = self.context_model(rnn_data)
-        # current_context = current_context[-1]
-
         # Get current Q estimates
         current_Q1, current_Q2 = self.critic(current_input, action)
 
@@ -157,12 +174,14 @@ class TD3Context(TD3):
 
         # Delayed policy updates
         if self.total_it % self.policy_freq == 0:
-            # actor_current_context, _ = self.context_model(rnn_data)
 
-            # actor_current_context = actor_current_context[-1]
-            # actor_current_context = actor_current_context[-2]
-
-            actor_current_input = torch.cat([state, context], dim=1)
+            if self.learnable_context:
+                actor_current_context_all, _ = self.context_model(rnn_data)
+                actor_current_context = actor_current_context_all[-2]
+                actor_current_input = torch.cat(
+                    [state, actor_current_context], dim=1)
+            else:
+                actor_current_input = torch.cat([state, context], dim=1)
 
             # Compute actor loss
             actor_loss = -self.critic.Q1(

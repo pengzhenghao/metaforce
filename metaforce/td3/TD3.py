@@ -8,8 +8,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# from .cnn_model import ConvActor, ConvCritic
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -80,7 +78,8 @@ class TD3(object):
         if isinstance(state_dim, tuple):
             raise NotImplementedError()
             # Image input!
-            # self.actor = ConvActor(state_dim, action_dim, max_action).to(device)
+            # self.actor = ConvActor(state_dim, action_dim, max_action).to(
+            # device)
             # self.critic = ConvCritic(state_dim, action_dim).to(device)
             # self.obs_rgb = True
         else:
@@ -127,9 +126,8 @@ class TD3(object):
         result = dict()
 
         # Sample replay buffer
-        state, action, next_state, reward, not_done, _ = replay_buffer.sample(
-            batch_size
-        )
+        _, state, action, next_state, reward, not_done, _ = \
+            replay_buffer.sample(batch_size)
 
         with torch.no_grad():
             # Select action according to policy and add clipped noise

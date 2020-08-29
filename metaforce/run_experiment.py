@@ -1,28 +1,38 @@
 import argparse
 import os
+import tempfile
 from collections import deque, defaultdict
 
 import gym
 import numpy as np
 import torch
+from ray.tune import track
 
-from metaforce.envs.meta_world import make_metaworld_env_fn
-from metaforce.meta_q_learning import TD3, TD3Context
-from metaforce.meta_q_learning.utils import ReplayBuffer, eval_policy
+from metaforce.envs import make_env_fn
+from metaforce.mql import TD3Context
+from metaforce.mql.utils import LearnableContextReplayBuffer, \
+    RandomContextReplayBuffer
+from metaforce.td3 import TD3, ReplayBuffer, eval_policy
 
 
-# from ray.tune import track
-
-
-# from safe_rl.td3 import TD3, TD3CTNB, ReplayBuffer, eval_policy, TD3QDiff, \
-#     TD3Context
-# from safe_rl.utils import core
-# from safety_gym.make_env import make_env_fn
+def check_meta_config(meta_config):
+    assert "context_mode" in meta_config
+    assert meta_config["context_mode"] in [
+        "add_both", "add_actor", "add_critic", "add_critic_transition",
+        "add_actor_transition", "add_both_transition", "random", "disable"
+    ]
+    meta_config["rnn_use_transition"] = \
+        "transition" in meta_config["context_mode"]
+    if meta_config["context_mode"] == "disable":
+        meta_config["context_mode"] = None
+    if "rnn_state_dim" not in meta_config:
+        meta_config['rnn_state_dim'] = 24
+    return meta_config
 
 
 def run_td3(
         env_fn,
-        env_name,
+        # env_name,
         seed,
         local_dir=".",
         load_model="",
@@ -38,14 +48,18 @@ def run_td3(
         max_timesteps=1e6,
         max_episode_steps=1000,
         eval_env_fn=None,
-        # saferl_config=None,
-        # tune_track=False,
+        meta_config=None,
+        tune_track=False,
         # use_rnn=False,
         rnn_state_dim=24,
         rnn_seq_len=20,
-        context_mode="disable",
+        # context_mode="disable",
         **kwargs
 ):
+    # Define those variable for meta learning
+    meta_config = check_meta_config(meta_config)
+    context_mode = meta_config.get("context_mode")
+
     result_path = os.path.join(local_dir, "results")
     if not os.path.exists(result_path):
         os.makedirs(result_path)
@@ -84,12 +98,9 @@ def run_td3(
     kwargs["noise_clip"] = noise_clip * max_action
     kwargs["policy_freq"] = policy_freq
 
-    # context_mode = saferl_config.get("context_mode", None)
-    if context_mode == "disable":
-        context_mode = None
-
     if context_mode:
         kwargs["context_mode"] = context_mode
+        kwargs["hidden_state_dim"] = meta_config.get("rnn_state_dim", 24)
         policy = TD3Context(**kwargs)
         print("We are using TD3-context model now!")
     else:
@@ -99,11 +110,20 @@ def run_td3(
         policy_file = load_model
         policy.load(os.path.join(model_path, policy_file))
 
-    replay_buffer = ReplayBuffer(
-        state_dim, action_dim, save_context=context_mode == "random",
-        context_dim=policy.hidden_state_dim \
-            if context_mode == "random" else None
-    )
+    if context_mode == "random":
+        replay_buffer = RandomContextReplayBuffer(
+            state_dim, action_dim,
+            context_dim=meta_config["rnn_state_dim"]
+        )
+    elif context_mode is not None:
+        replay_buffer = LearnableContextReplayBuffer(
+            state_dim, action_dim,
+            rnn_seq_len=meta_config.get("rnn_seq_len", 20),
+            rnn_state_dim=meta_config["rnn_state_dim"],
+            rnn_use_transition=meta_config["rnn_use_transition"]
+        )
+    else:
+        replay_buffer = ReplayBuffer(state_dim, action_dim)
 
     # Evaluate untrained policy
     evaluations = [eval_policy(policy, eval_env_fn or env_fn, seed)]
@@ -125,9 +145,6 @@ def run_td3(
     episode_length_record = deque(maxlen=record_length)
     cumulative_cost_record = deque(maxlen=record_length)
     other_stats = defaultdict(lambda: deque(maxlen=record_length))
-
-    # if saferl_config[core.USE_IPD_SOFT]:
-    #     ipd_episode_cost = 0.0
 
     last_state = np.zeros_like(state)
     last_action = np.zeros((action_dim,))
@@ -171,12 +188,14 @@ def run_td3(
         done_bool = float(done) if episode_timesteps < max_episode_steps else 0
 
         # Store data in replay buffer
-        replay_buffer.add(
-            state, action, next_state, reward, done_bool, -cost,
-            context=context if context_mode == "random" else None
-            # rnn_state=policy.prev_state if use_rnn else None
+        replay_buffer_add = (
+            state, action, next_state, reward, done_bool, -cost
         )
-        # TODO why use nagative cost above?????
+        if context_mode == "random":
+            replay_buffer_add += (context,)
+        elif context_mode is not None:
+            replay_buffer_add += (policy.prev_state.detach(),)
+        replay_buffer.add(*replay_buffer_add)
 
         state = next_state
         episode_reward += reward
@@ -235,77 +254,85 @@ def run_td3(
             )
             policy.save(os.path.join(model_path, "{}".format(t)))
 
+            if tune_track and t > learn_start:
+                track.log(
+                    episode_reward_min=np.min(episode_reward_record),
+                    episode_reward_mean_train=np.mean(episode_reward_record),
+                    episode_reward_mean=eval_result[0],
+                    episode_reward_max=np.max(episode_reward_record),
+                    episode_cost_min=np.min(episode_cost_record),
+                    episode_cost_mean_train=np.mean(episode_cost_record),
+                    episode_cost_mean=eval_result[1],
+                    episode_cost_max=np.max(episode_cost_record),
+                    cost_rate=np.mean(cost_rate_record),
+                    early_stop_rate=early_stop_counter / episode_num,
+                    episodes_this_iter=episode_num - prev_episode_num,
+                    timesteps_this_iter=t - prev_timesteps_total,
+                    mean_loss=np.mean(episode_cost_record),
+                    mean_accuracy=np.mean(cost_rate_record),
+                    **{k: np.mean(v)
+                       for k, v in other_stats.items()}
+                )
+                prev_episode_num = episode_num
+                prev_timesteps_total = t
+
+
+def run_td3_wrapper(config):
+    # Check meta config
+    meta_config = config.get("meta_config", {})
+    if not meta_config:
+        print("[WARNING] The input meta config is empty!")
+
+    # Build make_env function
+    env_fn = make_env_fn(env_name=config["env"], eval=False)
+    eval_env_fn = make_env_fn(env_name=config["env"], eval=True)
+
+    # Modify a set of config to accelerate debugging.
+    kwargs = dict() if not config["test_mode"] else dict(
+        learn_start=1000, max_timesteps=5000, eval_freq=2000
+    )
+    if config.get("max_timesteps", False):
+        kwargs["max_timesteps"] = config["max_timesteps"]
+
+    # Get local directory
+    local_dir = config["local_dir"]
+    exp_name = config["exp_name"]
+    assert local_dir
+    local_dir = os.path.join(local_dir, exp_name)
+
+    run_td3(
+        env_fn=env_fn,
+        seed=config["seed"],
+        local_dir=local_dir,
+        meta_config=config.get("meta_config", None),
+        tune_track=True,
+        eval_env_fn=eval_env_fn,
+        **kwargs
+    )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    # parser.add_argument(
-    #     "--policy", default="TD3", help="Policy name (TD3)"
-    # )
-    parser.add_argument("--env-name", default="HalfCheetah-v2")
+    parser.add_argument("--env", default="HalfCheetah-v2")
     parser.add_argument("--seed", default=0, type=int)
-    parser.add_argument(
-        "--learn_start",
-        default=25e3,
-        type=int,
-        help="Time steps initial random policy is used"
-    )
-    parser.add_argument(
-        "--eval_freq",
-        default=5e3,
-        type=int,
-        help="How often (time steps) we evaluate"
-    )
-    parser.add_argument(
-        "--max_timesteps",
-        default=1e6,
-        type=int,
-        help="Max time steps to run environment"
-    )
-    parser.add_argument(
-        "--expl_noise", default=0.1, help="Std of Gaussian exploration noise"
-    )
-    parser.add_argument(
-        "--batch_size",
-        default=256,
-        type=int,
-        help="Batch size for both actor and critic"
-    )
-    parser.add_argument("--discount", default=0.99)
-    parser.add_argument(
-        "--tau", default=0.005, help="Target network update rate"
-    )
-    parser.add_argument(
-        "--policy_noise",
-        default=0.2,
-        help="Noise added to target policy during critic update"
-    )
-    parser.add_argument(
-        "--noise_clip", default=0.5, help="Range to clip target policy noise"
-    )
-    parser.add_argument(
-        "--policy_freq",
-        default=2,
-        type=int,
-        help="Frequency of delayed policy updates"
-    )
-    # parser.add_argument(
-    #     "--save_model", action="store_true", help="Save model and optimizer"
-    # )
     parser.add_argument("--load_model", default="")
-    parser.add_argument("--cost_threshold", default=25, type=int)
-    parser.add_argument("--max_episode_steps", default=1000, type=int)
-    parser.add_argument("--use-ipd", action="store_true")
-    parser.add_argument("--use-ipd-soft", action="store_true")
-    parser.add_argument("--use-ctnb", action="store_true")
-    parser.add_argument("--use-qdiff", action="store_true")
     parser.add_argument("--context-mode", type=str,
                         default="add_both_transition")
     args = parser.parse_args()
 
-    run_td3(
-        env_fn=make_metaworld_env_fn(args.env_name),
-        # context_mode=args.context_mode,
-        # saferl_config=saferl_config,
-        # use_rnn=args.context_mode,
-        **vars(args)
+    config = dict(
+        exp_name="DELETE_ME",
+        local_dir=tempfile.gettempdir(),
+        test_mode=True,
+        batch_size=32,
+        max_timesteps=10000,
+        eval_freq=2000,
+        learn_start=1000,
+        seed=0,
+        env=args.env,
+        meta_config=dict(
+            context_mode=args.context_mode
+        )
     )
+
+    run_td3_wrapper(config)

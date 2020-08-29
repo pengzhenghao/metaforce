@@ -13,6 +13,7 @@ setup(
     install_requires=[
         "metaworld@git+https://github.com/rlworkgroup/metaworld.git"
         "@a3e80c2439aa96ff221d6226bcf7ab8b49689898",
-        "yapf==0.27.0"
+        "yapf==0.27.0", "ray==0.8.7", "pandas", "tensorboardX", "tabulate",
+        "gym[box2d]", "ray[rllib]"
     ]
 )
