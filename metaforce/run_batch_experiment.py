@@ -6,7 +6,7 @@ import time
 import ray
 from ray import tune
 
-from metaforce.run_experiment import run_td3_wrapper
+from metaforce.run_experiment import run_td3_wrapper, run_pearl
 from metaforce.utils import get_common_parser
 
 
@@ -17,10 +17,15 @@ def trial_name_creator(trial):
     else:
         raise ValueError("'env' term is not found in config: {}".format(config))
 
-    algo_name = "TD3"
-    context_mode = config.get("meta_config", dict()).get("context_mode", None)
-    if context_mode:
-        algo_name += "-{}".format(context_mode)
+    if config["experiment"].lower() == "pearl":
+        algo_name = "PEARL"
+    elif config["experiment"].lower() == "td3_context":
+        algo_name = "TD3"
+        context_mode = config.get("meta_config", dict()).get("context_mode", None)
+        if context_mode:
+            algo_name += "-{}".format(context_mode)
+    else:
+        raise NotImplementedError("Unknown experiment type: {}".format(config["experiment"]))
     return "{}_{}_{}".format(algo_name, env_name, trial.trial_id)
 
 
@@ -58,8 +63,12 @@ def run_batch_experiment(
         local_dir = os.path.expanduser("~/ray_results")
         config["local_dir"] = os.path.expanduser("~/ray_results")
 
+    assert config["exp_name"], "You should specify the experiment name!"
+
+    exp_function = {'td3_context': run_td3_wrapper, 'pearl': run_pearl}
+
     analysis = tune.run(
-        run_td3_wrapper,
+        exp_function[config['experiment'].lower()],
         name=config["exp_name"],
         config=config,
         max_failures=10 if not test_mode else 1,

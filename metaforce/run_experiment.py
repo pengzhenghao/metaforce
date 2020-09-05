@@ -14,6 +14,16 @@ from metaforce.mql.utils import LearnableContextReplayBuffer, \
     RandomContextReplayBuffer
 from metaforce.td3 import TD3, ReplayBuffer, eval_policy
 
+from metaforce.pearl.torch.sac.policies import TanhGaussianPolicy
+from metaforce.pearl.torch.networks import FlattenMlp, MlpEncoder, RecurrentEncoder
+from metaforce.pearl.torch.sac.sac import PEARLSoftActorCritic
+from metaforce.pearl.torch.sac.agent import PEARLAgent
+from metaforce.pearl.launchers.launcher_util import setup_logger
+import metaforce.pearl.torch.pytorch_util as ptu
+import pathlib
+from metaforce.pearl import default_config
+from metaforce.utils import deep_update_dict
+
 
 def check_meta_config(meta_config):
     assert "context_mode" in meta_config
@@ -311,9 +321,117 @@ def run_td3_wrapper(config):
     )
 
 
+def run_pearl(config):
+    config = deep_update_dict(default_config, config)
+
+    test_mode = config.get("test_mode", False)
+    if test_mode:
+        config["net_size"] = 32
+        config["algo_params"].update(
+            num_initial_steps=100,
+            num_tasks_sample=3,
+            num_iterations=5,
+            num_train_steps_per_itr=3
+        )
+
+    # create multi-task environment and sample tasks
+    env_fn = make_env_fn(env_name=config["env"], eval=False)
+    env = env_fn()
+    tasks = env.get_all_task_idx()
+    obs_dim = int(np.prod(env.observation_space.shape))
+    action_dim = int(np.prod(env.action_space.shape))
+    reward_dim = 1
+
+    # instantiate networks
+    latent_dim = config['latent_size']
+    context_encoder_input_dim = 2 * obs_dim + action_dim + reward_dim if config['algo_params'][
+        'use_next_obs_in_context'] else obs_dim + action_dim + reward_dim
+    context_encoder_output_dim = latent_dim * 2 if config['algo_params']['use_information_bottleneck'] else latent_dim
+    net_size = config['net_size']
+    recurrent = config['algo_params']['recurrent']
+    encoder_model = RecurrentEncoder if recurrent else MlpEncoder
+    context_encoder = encoder_model(
+        hidden_sizes=[200, 200, 200],
+        input_size=context_encoder_input_dim,
+        output_size=context_encoder_output_dim,
+    )
+    qf1 = FlattenMlp(
+        hidden_sizes=[net_size, net_size, net_size],
+        input_size=obs_dim + action_dim + latent_dim,
+        output_size=1,
+    )
+    qf2 = FlattenMlp(
+        hidden_sizes=[net_size, net_size, net_size],
+        input_size=obs_dim + action_dim + latent_dim,
+        output_size=1,
+    )
+    vf = FlattenMlp(
+        hidden_sizes=[net_size, net_size, net_size],
+        input_size=obs_dim + latent_dim,
+        output_size=1,
+    )
+    policy = TanhGaussianPolicy(
+        hidden_sizes=[net_size, net_size, net_size],
+        obs_dim=obs_dim + latent_dim,
+        latent_dim=latent_dim,
+        action_dim=action_dim,
+    )
+    agent = PEARLAgent(
+        latent_dim,
+        context_encoder,
+        policy,
+        **config['algo_params']
+    )
+    algorithm = PEARLSoftActorCritic(
+        env=env,
+        train_tasks=list(tasks[:config['n_train_tasks']]),
+        eval_tasks=list(tasks[-config['n_eval_tasks']:]),
+        nets=[agent, qf1, qf2, vf],
+        latent_dim=latent_dim,
+        **config['algo_params']
+    )
+
+    # optionally load pre-trained weights
+    if config['path_to_weights'] is not None:
+        path = config['path_to_weights']
+        context_encoder.load_state_dict(torch.load(os.path.join(path, 'context_encoder.pth')))
+        qf1.load_state_dict(torch.load(os.path.join(path, 'qf1.pth')))
+        qf2.load_state_dict(torch.load(os.path.join(path, 'qf2.pth')))
+        vf.load_state_dict(torch.load(os.path.join(path, 'vf.pth')))
+        # TODO hacky, revisit after model refactor
+        algorithm.networks[-2].load_state_dict(torch.load(os.path.join(path, 'target_vf.pth')))
+        policy.load_state_dict(torch.load(os.path.join(path, 'policy.pth')))
+
+    # optional GPU mode
+    use_gpu = config['util_params']['use_gpu']
+    if not torch.cuda.is_available():
+        use_gpu = False
+        print("[WARNING] You set to use gpu but none is found!")
+    ptu.set_gpu_mode(use_gpu, config['util_params']['gpu_id'])
+    if ptu.gpu_enabled():
+        algorithm.to()
+
+    # debugging triggers a lot of printing and logs to a debug directory
+    DEBUG = config['util_params']['debug']
+    os.environ['DEBUG'] = str(int(DEBUG))
+
+    # create logging directory
+    # TODO support Docker
+    exp_id = 'debug' if DEBUG else None
+    experiment_log_dir = setup_logger(config['env_name'], variant=config, exp_id=exp_id,
+                                      base_log_dir=config['util_params']['base_log_dir'])
+
+    # optionally save eval trajectories as pkl files
+    if config['algo_params']['dump_eval_paths']:
+        pickle_dir = experiment_log_dir + '/eval_trajectories'
+        pathlib.Path(pickle_dir).mkdir(parents=True, exist_ok=True)
+    # run the algorithm
+    algorithm.train()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", default="HalfCheetah-v2")
+    parser.add_argument("--env", default="mujoco_meta")
     parser.add_argument("--seed", default=0, type=int)
     parser.add_argument("--load_model", default="")
     parser.add_argument("--context-mode", type=str,
