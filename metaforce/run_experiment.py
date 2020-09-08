@@ -6,7 +6,7 @@ from metaforce.utils import get_common_parser
 import gym
 import numpy as np
 import torch
-from ray.tune import track
+from ray.tune import report
 
 from metaforce.envs import make_env_fn
 from metaforce.mql import TD3Context
@@ -265,7 +265,7 @@ def run_td3(
             policy.save(os.path.join(model_path, "{}".format(t)))
 
             if tune_track and t > learn_start:
-                track.log(
+                report(
                     episode_reward_min=np.min(episode_reward_record),
                     episode_reward_mean_train=np.mean(episode_reward_record),
                     episode_reward_mean=eval_result[0],
@@ -431,8 +431,8 @@ def run_pearl(config):
 
 if __name__ == "__main__":
     parser = get_common_parser()
-    parser.add_argument("--context-mode", type=str,
-                        default="add_both_transition")
+    parser.add_argument("--context-mode", type=str, default="add_both_transition")
+    parser.add_argument("--experiment", type=str, default="td3_context")
     args = parser.parse_args()
 
     config = dict(

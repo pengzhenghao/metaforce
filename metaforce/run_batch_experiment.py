@@ -98,6 +98,7 @@ if __name__ == '__main__':
     # So you set whatever you like here in the config.
     # We never run this script directly when launching formal experiments.
     parser = get_common_parser()
+    parser.add_argument("--experiment", default="td3_context", type=str)
     args = parser.parse_args()
     config = dict(
         exp_name=args.exp_name,

@@ -18,7 +18,8 @@ def deep_update_dict(fr, to):
 
 def get_common_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--experiment', type=str, default="td3_context")  # pearl, td3_context
+    # Don't set it here.
+    # parser.add_argument('--experiment', type=str, default="td3_context")  # pearl, td3_context
     parser.add_argument('--local-mode', action="store_true")
     parser.add_argument('--num-seeds', type=int, default=3)
     parser.add_argument('--exp-name', type=str, default='')
