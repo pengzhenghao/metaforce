@@ -2,11 +2,11 @@ import argparse
 import os
 import tempfile
 from collections import deque, defaultdict
-
+from metaforce.utils import get_common_parser
 import gym
 import numpy as np
 import torch
-from ray.tune import track
+from ray.tune import report
 
 from metaforce.envs import make_env_fn
 from metaforce.mql import TD3Context
@@ -204,7 +204,7 @@ def run_td3(
         if context_mode == "random":
             replay_buffer_add += (context,)
         elif context_mode is not None:
-            replay_buffer_add += (policy.prev_state.detach(),)
+            replay_buffer_add += (policy.prev_state.detach().cpu().numpy(),)
         replay_buffer.add(*replay_buffer_add)
 
         state = next_state
@@ -265,7 +265,7 @@ def run_td3(
             policy.save(os.path.join(model_path, "{}".format(t)))
 
             if tune_track and t > learn_start:
-                track.log(
+                report(
                     episode_reward_min=np.min(episode_reward_record),
                     episode_reward_mean_train=np.mean(episode_reward_record),
                     episode_reward_mean=eval_result[0],
@@ -430,12 +430,9 @@ def run_pearl(config):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--env", default="mujoco_meta")
-    parser.add_argument("--seed", default=0, type=int)
-    parser.add_argument("--load_model", default="")
-    parser.add_argument("--context-mode", type=str,
-                        default="add_both_transition")
+    parser = get_common_parser()
+    parser.add_argument("--context-mode", type=str, default="add_both_transition")
+    parser.add_argument("--experiment", type=str, default="td3_context")
     args = parser.parse_args()
 
     config = dict(
@@ -448,6 +445,7 @@ if __name__ == "__main__":
         learn_start=1000,
         seed=0,
         env=args.env,
+        experiment=args.experiment,
         meta_config=dict(
             context_mode=args.context_mode
         )

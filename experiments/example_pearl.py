@@ -15,7 +15,10 @@ if __name__ == '__main__':
         # env="sparse-point-robot",
         env=tune.grid_search(["ant-dir", "ant-goal", "cheetah-dir", "cheetah-vel", "humanoid-dir", "point-robot",
                               "sparse-point-robot", "walker-rand-params", "hopper-rand-params"]),
-        experiment=args.experiment,
+        # experiment=args.experiment,
+
+        experiment="pearl",
+
         num_cpus=args.num_cpus,
         num_gpus=args.num_gpus,
         env_name=args.env,  # cheetah-dir, ant-dir
