@@ -98,13 +98,13 @@ if __name__ == '__main__':
     # So you set whatever you like here in the config.
     # We never run this script directly when launching formal experiments.
     parser = get_common_parser()
-    parser.add_argument("--env", type=str, default="BipedalWalker-v3")
     args = parser.parse_args()
     config = dict(
         exp_name=args.exp_name,
         env=args.env,
         num_cpus=args.num_cpus,
         num_gpus=args.num_gpus,
+        experiment=args.experiment,
 
         batch_size=4,
         max_timesteps=10000,

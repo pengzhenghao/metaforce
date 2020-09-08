@@ -2,7 +2,7 @@ import argparse
 import os
 import tempfile
 from collections import deque, defaultdict
-
+from metaforce.utils import get_common_parser
 import gym
 import numpy as np
 import torch
@@ -430,10 +430,7 @@ def run_pearl(config):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--env", default="mujoco_meta")
-    parser.add_argument("--seed", default=0, type=int)
-    parser.add_argument("--load_model", default="")
+    parser = get_common_parser()
     parser.add_argument("--context-mode", type=str,
                         default="add_both_transition")
     args = parser.parse_args()
@@ -448,6 +445,7 @@ if __name__ == "__main__":
         learn_start=1000,
         seed=0,
         env=args.env,
+        experiment=args.experiment,
         meta_config=dict(
             context_mode=args.context_mode
         )
