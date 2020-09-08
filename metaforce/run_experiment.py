@@ -204,7 +204,7 @@ def run_td3(
         if context_mode == "random":
             replay_buffer_add += (context,)
         elif context_mode is not None:
-            replay_buffer_add += (policy.prev_state.detach(),)
+            replay_buffer_add += (policy.prev_state.detach().cpu().numpy(),)
         replay_buffer.add(*replay_buffer_add)
 
         state = next_state
