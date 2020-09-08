@@ -10,6 +10,7 @@ if __name__ == '__main__':
         num_cpus=args.num_cpus,
         num_gpus=args.num_gpus,
         exp_name=args.exp_name,
+        experiment="td3_context",
 
         # Hand coded setting
         env="ml10",  # <<== handcoded
